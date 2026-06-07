@@ -1,0 +1,8 @@
+node_modules/
+/dist/
+!frontend/dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
+build/
+*.log
+.DS_Store

@@ -1,0 +1,1 @@
+# keep the dist directory available for Go embed before frontend builds
