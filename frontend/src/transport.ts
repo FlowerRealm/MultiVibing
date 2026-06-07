@@ -27,22 +27,25 @@ export interface Transport {
   subscribe(onEvent: (event: AppEvent) => void): () => void;
 }
 
+interface WailsBridge {
+  Health(): Promise<Health>;
+  CodexStatus(): Promise<CodexStatus>;
+}
+
 declare global {
   interface Window {
     go?: {
       desktop?: {
-        Bridge?: {
-          Health(): Promise<Health>;
-          CodexStatus(): Promise<CodexStatus>;
-        };
+        Bridge?: WailsBridge;
       };
     };
   }
 }
 
 export function createTransport(): Transport {
-  if (window.go?.desktop?.Bridge) {
-    return new WailsTransport(window.go.desktop.Bridge);
+  const bridge = window.go?.desktop?.Bridge;
+  if (bridge) {
+    return new WailsTransport(bridge);
   }
   return new BrowserTransport(import.meta.env.VITE_API_BASE ?? "");
 }
@@ -84,7 +87,7 @@ class BrowserTransport implements Transport {
 }
 
 class WailsTransport implements Transport {
-  constructor(private readonly bridge: NonNullable<Window["go"]>["desktop"]["Bridge"]) {}
+  constructor(private readonly bridge: WailsBridge) {}
 
   health(): Promise<Health> {
     return this.bridge.Health();
