@@ -10,7 +10,8 @@
     "build": "vite build && node -e \"require('node:fs').writeFileSync('frontend/dist/.gitkeep', '# keep the dist directory available for Go embed before frontend builds\\n')\"",
     "build:desktop": "npm run build && wails build",
     "dev:desktop": "wails dev",
-    "test": "go test ./... && npm run build"
+    "typecheck": "tsc --noEmit",
+    "test": "go test ./... && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
