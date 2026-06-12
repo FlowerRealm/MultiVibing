@@ -32,130 +32,49 @@ export interface Client {
   subscribeTerminal(id: string, handlers: TerminalHandlers): () => void;
 }
 
-interface WailsBridge {
-  ListProjects(): Promise<Project[] | null>;
-  OpenProjectDialog(): Promise<Project | null>;
-  ForgetProject(id: string): Promise<void>;
-  ListTerminals(projectId: string): Promise<TerminalSession[] | null>;
-  StartTerminal(projectId: string, cols: number, rows: number): Promise<TerminalSession>;
-  WriteTerminal(id: string, data: string): Promise<void>;
-  ResizeTerminal(id: string, cols: number, rows: number): Promise<void>;
-  CloseTerminal(id: string): Promise<void>;
-}
-
-interface WailsRuntime {
-  EventsOn(eventName: string, callback: (payload: TerminalPayload) => void): (() => void) | void;
-}
-
-interface TerminalPayload {
-  terminalId?: string;
-  data?: string;
-  exitCode?: number | null;
-  error?: string;
-}
-
 declare global {
   interface Window {
-    go?: {
-      desktop?: {
-        Bridge?: WailsBridge;
-      };
-    };
-    runtime?: WailsRuntime;
+    go?: { desktop?: { Bridge?: Record<string, (...args: unknown[]) => Promise<unknown>> } };
+    runtime?: { EventsOn(name: string, cb: (payload: Record<string, unknown>) => void): (() => void) | void };
   }
 }
 
 export function createClient(): Client {
-  const bridge = window.go?.desktop?.Bridge;
-  if (!bridge) {
-    return missingClient();
+  const b = window.go?.desktop?.Bridge;
+  if (!b) {
+    const fail = async (): Promise<never> => { throw new Error("Wails bridge unavailable — run wails dev"); };
+    return { listProjects: fail, openProjectDialog: fail, forgetProject: fail, listTerminals: fail,
+             startTerminal: fail, writeTerminal: fail, resizeTerminal: fail, closeTerminal: fail,
+             subscribeTerminal: () => () => {} };
   }
-  return new WailsClient(bridge, window.runtime);
+  return new WailsClient(b, window.runtime);
 }
+
+type Bridge = NonNullable<NonNullable<Window["go"]>["desktop"]>["Bridge"];
+type Runtime = NonNullable<Window["runtime"]>;
 
 class WailsClient implements Client {
-  constructor(
-    private readonly bridge: WailsBridge,
-    private readonly runtime?: WailsRuntime,
-  ) {}
+  constructor(private b: Bridge, private rt?: Runtime) {}
 
-  async listProjects(): Promise<Project[]> {
-    return arrayOrEmpty(await this.bridge.ListProjects());
-  }
-
-  openProjectDialog(): Promise<Project | null> {
-    return this.bridge.OpenProjectDialog();
-  }
-
-  forgetProject(id: string): Promise<void> {
-    return this.bridge.ForgetProject(id);
-  }
-
-  async listTerminals(projectId = ""): Promise<TerminalSession[]> {
-    return arrayOrEmpty(await this.bridge.ListTerminals(projectId));
-  }
-
-  startTerminal(projectId: string, cols: number, rows: number): Promise<TerminalSession> {
-    return this.bridge.StartTerminal(projectId, cols, rows);
-  }
-
-  writeTerminal(id: string, data: string): Promise<void> {
-    return this.bridge.WriteTerminal(id, data);
-  }
-
-  resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
-    return this.bridge.ResizeTerminal(id, cols, rows);
-  }
-
-  closeTerminal(id: string): Promise<void> {
-    return this.bridge.CloseTerminal(id);
-  }
+  async listProjects() { return ((await this.b!.ListProjects()) as Project[] | null) ?? []; }
+  openProjectDialog() { return this.b!.OpenProjectDialog() as Promise<Project | null>; }
+  forgetProject(id: string) { return this.b!.ForgetProject(id) as Promise<void>; }
+  async listTerminals(projectId = "") { return ((await this.b!.ListTerminals(projectId)) as TerminalSession[] | null) ?? []; }
+  startTerminal(projectId: string, cols: number, rows: number) { return this.b!.StartTerminal(projectId, cols, rows) as Promise<TerminalSession>; }
+  writeTerminal(id: string, data: string) { return this.b!.WriteTerminal(id, data) as Promise<void>; }
+  resizeTerminal(id: string, cols: number, rows: number) { return this.b!.ResizeTerminal(id, cols, rows) as Promise<void>; }
+  closeTerminal(id: string) { return this.b!.CloseTerminal(id) as Promise<void>; }
 
   subscribeTerminal(id: string, handlers: TerminalHandlers): () => void {
-    const offData = this.on("terminal:data", id, (payload) => handlers.onData(String(payload.data ?? "")));
-    const offExit = this.on("terminal:exit", id, (payload) => handlers.onExit(numberOrNull(payload.exitCode)));
-    const offError = this.on("terminal:error", id, (payload) => handlers.onError(String(payload.error ?? "terminal error")));
-    return () => {
-      offData();
-      offExit();
-      offError();
+    const on = (name: string, cb: (p: Record<string, unknown>) => void) => {
+      const off = this.rt?.EventsOn(name, (p) => { if (p?.terminalId === id) cb(p); });
+      return typeof off === "function" ? off : () => {};
     };
+    const offs = [
+      on("terminal:data", (p) => handlers.onData(String(p.data ?? ""))),
+      on("terminal:exit", (p) => handlers.onExit(typeof p.exitCode === "number" ? p.exitCode : null)),
+      on("terminal:error", (p) => handlers.onError(String(p.error ?? "terminal error"))),
+    ];
+    return () => offs.forEach((f) => f());
   }
-
-  private on(eventName: string, id: string, callback: (payload: TerminalPayload) => void): () => void {
-    const cancel = this.runtime?.EventsOn(eventName, (payload) => {
-      if (payload?.terminalId === id) {
-        callback(payload);
-      }
-    });
-    if (typeof cancel === "function") {
-      return cancel;
-    }
-    return () => {};
-  }
-}
-
-function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
-}
-
-function missingClient(): Client {
-  const fail = async () => {
-    throw new Error("Wails bridge is not available. Run the app with wails dev.");
-  };
-  return {
-    listProjects: fail,
-    openProjectDialog: fail,
-    forgetProject: fail,
-    listTerminals: fail,
-    startTerminal: fail,
-    writeTerminal: fail,
-    resizeTerminal: fail,
-    closeTerminal: fail,
-    subscribeTerminal: () => () => {},
-  };
 }

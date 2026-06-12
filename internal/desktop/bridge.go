@@ -13,9 +13,8 @@ import (
 type Bridge struct {
 	projects  *projects.Store
 	terminals *terminal.Manager
-
-	mu  sync.Mutex
-	ctx context.Context
+	mu        sync.Mutex
+	ctx       context.Context
 }
 
 func NewBridge(projects *projects.Store, terminals *terminal.Manager) *Bridge {
@@ -26,23 +25,22 @@ func (b *Bridge) Startup(ctx context.Context) {
 	b.mu.Lock()
 	b.ctx = ctx
 	b.mu.Unlock()
-
-	b.terminals.SetEventHandler(func(event terminal.Event) {
-		current := b.context()
-		if current == nil {
+	b.terminals.SetEventHandler(func(e terminal.Event) {
+		ctx := b.context()
+		if ctx == nil {
 			return
 		}
-		payload := map[string]any{"terminalId": event.TerminalID}
-		if event.Data != "" {
-			payload["data"] = event.Data
+		payload := map[string]any{"terminalId": e.TerminalID}
+		if e.Data != "" {
+			payload["data"] = e.Data
 		}
-		if event.ExitCode != nil {
-			payload["exitCode"] = *event.ExitCode
+		if e.ExitCode != nil {
+			payload["exitCode"] = *e.ExitCode
 		}
-		if event.Error != "" {
-			payload["error"] = event.Error
+		if e.Error != "" {
+			payload["error"] = e.Error
 		}
-		runtime.EventsEmit(current, event.Name, payload)
+		runtime.EventsEmit(ctx, e.Name, payload)
 	})
 }
 
@@ -54,8 +52,14 @@ func (b *Bridge) Shutdown(context.Context) {
 	b.terminals.Shutdown()
 }
 
-func (b *Bridge) ListProjects() ([]projects.Project, error) {
-	return b.projects.List()
+func (b *Bridge) ListProjects() ([]projects.Project, error)      { return b.projects.List() }
+func (b *Bridge) ForgetProject(id string) error                   { return b.projects.Forget(id) }
+func (b *Bridge) ListTerminals(projectID string) []terminal.Session { return b.terminals.List(projectID) }
+func (b *Bridge) WriteTerminal(id, data string) error             { return b.terminals.Write(id, data) }
+func (b *Bridge) CloseTerminal(id string) error                   { return b.terminals.Close(id) }
+
+func (b *Bridge) ResizeTerminal(id string, cols, rows int) error {
+	return b.terminals.Resize(id, cols, rows)
 }
 
 func (b *Bridge) OpenProjectDialog() (*projects.Project, error) {
@@ -63,48 +67,23 @@ func (b *Bridge) OpenProjectDialog() (*projects.Project, error) {
 	if ctx == nil {
 		return nil, nil
 	}
-	path, err := runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
-		Title: "Open Project",
-	})
+	path, err := runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{Title: "Open Project"})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	p, err := b.projects.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if path == "" {
-		return nil, nil
-	}
-	project, err := b.projects.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	return &project, nil
+	return &p, nil
 }
 
-func (b *Bridge) ForgetProject(id string) error {
-	return b.projects.Forget(id)
-}
-
-func (b *Bridge) ListTerminals(projectID string) []terminal.Session {
-	return b.terminals.List(projectID)
-}
-
-func (b *Bridge) StartTerminal(projectID string, cols int, rows int) (terminal.Session, error) {
-	project, err := b.projects.Get(projectID)
+func (b *Bridge) StartTerminal(projectID string, cols, rows int) (terminal.Session, error) {
+	p, err := b.projects.Get(projectID)
 	if err != nil {
 		return terminal.Session{}, err
 	}
-	return b.terminals.Start(project.ID, project.Path, cols, rows)
-}
-
-func (b *Bridge) WriteTerminal(id string, data string) error {
-	return b.terminals.Write(id, data)
-}
-
-func (b *Bridge) ResizeTerminal(id string, cols int, rows int) error {
-	return b.terminals.Resize(id, cols, rows)
-}
-
-func (b *Bridge) CloseTerminal(id string) error {
-	return b.terminals.Close(id)
+	return b.terminals.Start(p.ID, p.Path, cols, rows)
 }
 
 func (b *Bridge) context() context.Context {

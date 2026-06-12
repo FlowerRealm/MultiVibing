@@ -17,15 +17,6 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-  const sessionRef = useRef(session);
-  const onExitRef = useRef(onExit);
-  const onErrorRef = useRef(onError);
-
-  useEffect(() => {
-    sessionRef.current = session;
-    onExitRef.current = onExit;
-    onErrorRef.current = onError;
-  }, [onError, onExit, session]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,12 +27,7 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
       convertEol: true,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
       fontSize: 13,
-      theme: {
-        background: "#101416",
-        foreground: "#e6eee9",
-        cursor: "#f4d06f",
-        selectionBackground: "#315b66",
-      },
+      theme: { background: "#101416", foreground: "#e6eee9", cursor: "#f4d06f", selectionBackground: "#315b66" },
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -52,17 +38,13 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
     const fitTerminal = () => {
       try {
         fit.fit();
-        void client.resizeTerminal(sessionRef.current.id, terminal.cols, terminal.rows);
-      } catch {
-        // xterm can throw before layout has a measurable box.
-      }
+        void client.resizeTerminal(session.id, terminal.cols, terminal.rows);
+      } catch { /* xterm may throw before layout is measurable */ }
     };
 
-    const dataDisposable = terminal.onData((data) => {
-      void client.writeTerminal(sessionRef.current.id, data);
-    });
-    const resizeObserver = new ResizeObserver(fitTerminal);
-    resizeObserver.observe(container);
+    const dataDisposable = terminal.onData((data) => void client.writeTerminal(session.id, data));
+    const observer = new ResizeObserver(fitTerminal);
+    observer.observe(container);
     window.requestAnimationFrame(fitTerminal);
 
     if (session.status === "running") {
@@ -71,37 +53,33 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
         onExit: (exitCode) => {
           terminal.writeln("");
           terminal.writeln(`[进程已退出${exitCode === null ? "" : `: ${exitCode}`}]`);
-          onExitRef.current(sessionRef.current.id, exitCode);
+          onExit(session.id, exitCode);
         },
-        onError: (message) => onErrorRef.current(message),
+        onError,
       });
     }
 
     return () => {
       dataDisposable.dispose();
-      resizeObserver.disconnect();
+      observer.disconnect();
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [client, session.id]);
+  }, [client, session.id, session.status, onExit, onError]);
 
   useEffect(() => {
     if (!visible) return;
     window.requestAnimationFrame(() => {
       try {
         fitRef.current?.fit();
-        const terminal = terminalRef.current;
-        if (terminal) {
-          void client.resizeTerminal(sessionRef.current.id, terminal.cols, terminal.rows);
-        }
-      } catch {
-        // Layout may not be ready on the first frame.
-      }
+        const t = terminalRef.current;
+        if (t) void client.resizeTerminal(session.id, t.cols, t.rows);
+      } catch { /* layout may not be ready */ }
     });
-  }, [visible]);
+  }, [visible, client, session.id]);
 
   return <div className={visible ? "terminal-pane active" : "terminal-pane"} ref={containerRef} />;
 }

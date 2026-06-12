@@ -39,7 +39,7 @@ export function App({ client: providedClient }: AppProps = {}) {
       setProjects((current) => upsertProject(current, project));
       setActiveProjectId(project.id);
       const nextTerminals = await client.listTerminals(project.id);
-      setTerminals((current) => mergeProjectTerminals(current, project.id, nextTerminals));
+      setTerminals((current) => [...current.filter((t) => t.projectId !== project.id), ...nextTerminals]);
       setActiveTerminalId(nextTerminals[0]?.id ?? null);
     } catch (err) {
       setError(errorText(err));
@@ -69,7 +69,10 @@ export function App({ client: providedClient }: AppProps = {}) {
     try {
       setError(null);
       const session = await client.startTerminal(activeProject.id, 100, 30);
-      setTerminals((current) => upsertTerminal(current, session));
+      setTerminals((current) => {
+        const idx = current.findIndex((t) => t.id === session.id);
+        return idx === -1 ? [...current, session] : current.map((t, i) => (i === idx ? session : t));
+      });
       setActiveTerminalId(session.id);
     } catch (err) {
       setError(errorText(err));
@@ -93,19 +96,11 @@ export function App({ client: providedClient }: AppProps = {}) {
     }
   }
 
-  function markExited(id: string, exitCode: number | null) {
+  const markExited = useCallback((id: string, exitCode: number | null) => {
     setTerminals((current) =>
-      current.map((terminal) =>
-        terminal.id === id
-          ? {
-              ...terminal,
-              status: "exited",
-              exitCode,
-            }
-          : terminal,
-      ),
+      current.map((t) => (t.id === id ? { ...t, status: "exited" as const, exitCode } : t)),
     );
-  }
+  }, []);
 
   return (
     <main className="workspace">
@@ -214,24 +209,6 @@ export function App({ client: providedClient }: AppProps = {}) {
 
 function upsertProject(projects: Project[], project: Project): Project[] {
   return [project, ...projects.filter((current) => current.id !== project.id)];
-}
-
-function upsertTerminal(terminals: TerminalSession[], terminal: TerminalSession): TerminalSession[] {
-  const index = terminals.findIndex((current) => current.id === terminal.id);
-  if (index === -1) {
-    return [...terminals, terminal];
-  }
-  const next = terminals.slice();
-  next[index] = terminal;
-  return next;
-}
-
-function mergeProjectTerminals(
-  terminals: TerminalSession[],
-  projectId: string,
-  projectTerminals: TerminalSession[],
-): TerminalSession[] {
-  return [...terminals.filter((terminal) => terminal.projectId !== projectId), ...projectTerminals];
 }
 
 function errorText(error: unknown): string {
