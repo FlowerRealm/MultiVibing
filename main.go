@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -8,10 +9,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
-	"github.com/flowerrealm/multivibing/internal/app"
-	"github.com/flowerrealm/multivibing/internal/codex"
 	"github.com/flowerrealm/multivibing/internal/desktop"
-	"github.com/flowerrealm/multivibing/internal/events"
+	"github.com/flowerrealm/multivibing/internal/projects"
+	"github.com/flowerrealm/multivibing/internal/terminal"
 )
 
 const desktopVersion = "0.1.0"
@@ -20,17 +20,24 @@ const desktopVersion = "0.1.0"
 var assets embed.FS
 
 func main() {
-	bus := events.NewBus()
-	gateway := codex.NewAppServerGateway(codex.DefaultLaunchConfig(), bus)
-	service := app.NewService(desktopVersion, gateway, bus)
-	bridge := desktop.NewBridge(service)
+	projectStorePath, err := projects.DefaultStorePath()
+	if err != nil {
+		log.Fatal(err)
+	}
+	projectStore := projects.NewStore(projectStorePath)
+	terminals := terminal.NewManager()
+	bridge := desktop.NewBridge(projectStore, terminals)
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:  "MultiVibing",
 		Width:  1200,
 		Height: 800,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+		},
+		OnStartup: bridge.Startup,
+		OnShutdown: func(ctx context.Context) {
+			bridge.Shutdown(ctx)
 		},
 		Bind: []interface{}{bridge},
 	})

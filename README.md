@@ -1,8 +1,7 @@
 # MultiVibing
 
-MultiVibing is a Go-first client shell for Codex CLI. The initial project only
-contains architecture scaffolding: a browser-mode server, a Wails desktop shell,
-and a Codex app-server gateway.
+MultiVibing is a small Wails desktop app for opening local projects and running
+project-scoped terminals.
 
 ## Development
 
@@ -11,14 +10,11 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts the Vite frontend and the Go browser server, then opens the
-local browser.
-
-Desktop mode uses Wails v2:
+`npm run dev` starts Wails in development mode. A standalone browser server is
+not part of the app.
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-npm run dev:desktop
 npm run build:desktop
 ```
 

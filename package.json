@@ -4,25 +4,31 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173",
-    "dev:server": "go run ./cmd/multivibing --frontend-dev-url http://127.0.0.1:5173",
     "build": "vite build && node -e \"require('node:fs').writeFileSync('frontend/dist/.gitkeep', '# keep the dist directory available for Go embed before frontend builds\\n')\"",
     "build:desktop": "npm run build && wails build",
-    "dev:desktop": "wails dev",
+    "dev": "wails dev",
     "typecheck": "tsc --noEmit",
-    "test": "go test ./... && npm run typecheck && npm run build"
+    "test:frontend": "vitest run",
+    "test": "go test ./... && npm run test:frontend && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
-    "vite": "^7.2.6",
-    "typescript": "^5.9.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "lucide-react": "^1.17.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "concurrently": "^9.2.1"
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.8"
   }
 }
