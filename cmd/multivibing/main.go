@@ -23,7 +23,7 @@ import (
 const version = "0.1.0"
 
 func main() {
-	cfg, err := config.ParseBrowserArgs(os.Args[1:])
+	cfg, err := config.ParseServerArgs(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func main() {
 	}
 
 	url := cfg.PublicURL()
-	log.Printf("MultiVibing browser server listening at http://%s", listener.Addr().String())
+	log.Printf("MultiVibing web server listening at http://%s", listener.Addr().String())
 	if cfg.OpenBrowser {
 		go func() {
 			time.Sleep(300 * time.Millisecond)

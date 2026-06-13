@@ -11,7 +11,7 @@ const (
 	DefaultPort = 34117
 )
 
-type BrowserConfig struct {
+type ServerConfig struct {
 	Host           string
 	Port           int
 	OpenBrowser    bool
@@ -19,8 +19,8 @@ type BrowserConfig struct {
 	StaticDir      string
 }
 
-func DefaultBrowserConfig() BrowserConfig {
-	return BrowserConfig{
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
 		Host:        DefaultHost,
 		Port:        DefaultPort,
 		OpenBrowser: true,
@@ -28,39 +28,39 @@ func DefaultBrowserConfig() BrowserConfig {
 	}
 }
 
-func (c BrowserConfig) Addr() string {
+func (c ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
-func (c BrowserConfig) PublicURL() string {
+func (c ServerConfig) PublicURL() string {
 	if c.FrontendDevURL != "" {
 		return c.FrontendDevURL
 	}
 	return "http://" + c.Addr()
 }
 
-func ParseBrowserArgs(args []string) (BrowserConfig, error) {
-	cfg := DefaultBrowserConfig()
+func ParseServerArgs(args []string) (ServerConfig, error) {
+	cfg := DefaultServerConfig()
 
 	fs := flag.NewFlagSet("multivibing", flag.ContinueOnError)
-	fs.StringVar(&cfg.Host, "host", cfg.Host, "host for the browser-mode HTTP server")
-	fs.IntVar(&cfg.Port, "port", cfg.Port, "port for the browser-mode HTTP server")
+	fs.StringVar(&cfg.Host, "host", cfg.Host, "host for the web HTTP server")
+	fs.IntVar(&cfg.Port, "port", cfg.Port, "port for the web HTTP server")
 	fs.BoolVar(&cfg.OpenBrowser, "open", cfg.OpenBrowser, "open the local browser after startup")
 	fs.StringVar(&cfg.FrontendDevURL, "frontend-dev-url", cfg.FrontendDevURL, "optional Vite dev server URL to open")
 	fs.StringVar(&cfg.StaticDir, "static-dir", cfg.StaticDir, "directory containing built frontend assets")
 
 	noOpen := fs.Bool("no-open", false, "do not open the browser after startup")
 	if err := fs.Parse(args); err != nil {
-		return BrowserConfig{}, err
+		return ServerConfig{}, err
 	}
 	if *noOpen {
 		cfg.OpenBrowser = false
 	}
 	if cfg.Host == "" {
-		return BrowserConfig{}, errors.New("host cannot be empty")
+		return ServerConfig{}, errors.New("host cannot be empty")
 	}
 	if cfg.Port < 0 || cfg.Port > 65535 {
-		return BrowserConfig{}, fmt.Errorf("port out of range: %d", cfg.Port)
+		return ServerConfig{}, fmt.Errorf("port out of range: %d", cfg.Port)
 	}
 	return cfg, nil
 }
