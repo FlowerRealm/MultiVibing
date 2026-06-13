@@ -2,21 +2,24 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
-import type { Client, TerminalSession } from "../bridge";
+import { api, type TerminalSession } from "../bridge";
 
 interface TerminalPaneProps {
   session: TerminalSession;
   visible: boolean;
-  client: Client;
   onExit(terminalId: string, exitCode: number | null): void;
   onError(error: string): void;
 }
 
-export function TerminalPane({ session, visible, client, onExit, onError }: TerminalPaneProps) {
+export function TerminalPane({ session, visible, onExit, onError }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const visibleRef = useRef(visible);
+
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,19 +39,25 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
     fitRef.current = fit;
 
     const fitTerminal = () => {
+      if (!visibleRef.current || container.offsetParent === null) return;
       try {
         fit.fit();
-        void client.resizeTerminal(session.id, terminal.cols, terminal.rows);
-      } catch { /* xterm may throw before layout is measurable */ }
+        void api.resizeTerminal(session.id, terminal.cols, terminal.rows);
+      } catch {}
     };
 
-    const dataDisposable = terminal.onData((data) => void client.writeTerminal(session.id, data));
-    const observer = new ResizeObserver(fitTerminal);
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const dataDisposable = terminal.onData((data) => void api.writeTerminal(session.id, data));
+    const observer = new ResizeObserver(() => {
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fitTerminal, 150);
+    });
     observer.observe(container);
     window.requestAnimationFrame(fitTerminal);
 
+    let unsubscribe: (() => void) | undefined;
     if (session.status === "running") {
-      unsubscribeRef.current = client.subscribeTerminal(session.id, {
+      unsubscribe = api.subscribeTerminal(session.id, {
         onData: (data) => terminal.write(data),
         onExit: (exitCode) => {
           terminal.writeln("");
@@ -60,15 +69,15 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
     }
 
     return () => {
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
       dataDisposable.dispose();
       observer.disconnect();
-      unsubscribeRef.current?.();
-      unsubscribeRef.current = null;
+      unsubscribe?.();
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [client, session.id, session.status, onExit, onError]);
+  }, [session.id, session.status, onExit, onError]);
 
   useEffect(() => {
     if (!visible) return;
@@ -76,10 +85,10 @@ export function TerminalPane({ session, visible, client, onExit, onError }: Term
       try {
         fitRef.current?.fit();
         const t = terminalRef.current;
-        if (t) void client.resizeTerminal(session.id, t.cols, t.rows);
-      } catch { /* layout may not be ready */ }
+        if (t) void api.resizeTerminal(session.id, t.cols, t.rows);
+      } catch {}
     });
-  }, [visible, client, session.id]);
+  }, [visible, session.id]);
 
   return <div className={visible ? "terminal-pane active" : "terminal-pane"} ref={containerRef} />;
 }

@@ -24,12 +24,12 @@ const (
 )
 
 type Session struct {
-	ID        string  `json:"id"`
-	ProjectID string  `json:"projectId"`
-	Cwd       string  `json:"cwd"`
-	PID       int     `json:"pid"`
-	Status    Status  `json:"status"`
-	ExitCode  *int    `json:"exitCode,omitempty"`
+	ID        string `json:"id"`
+	ProjectID string `json:"projectId"`
+	Cwd       string `json:"cwd"`
+	PID       int    `json:"pid"`
+	Status    Status `json:"status"`
+	ExitCode  *int   `json:"exitCode,omitempty"`
 }
 
 type Event struct {
@@ -56,14 +56,8 @@ type Manager struct {
 	emit    func(Event)
 }
 
-func NewManager() *Manager {
-	return &Manager{entries: make(map[string]*entry)}
-}
-
-func (m *Manager) SetEventHandler(emit func(Event)) {
-	m.mu.Lock()
-	m.emit = emit
-	m.mu.Unlock()
+func NewManager(emit func(Event)) *Manager {
+	return &Manager{entries: make(map[string]*entry), emit: emit}
 }
 
 func (m *Manager) List(projectID string) []Session {
@@ -211,11 +205,8 @@ func (m *Manager) waitExit(id string, e *entry) {
 }
 
 func (m *Manager) publish(event Event) {
-	m.mu.RLock()
-	emit := m.emit
-	m.mu.RUnlock()
-	if emit != nil {
-		emit(event)
+	if m.emit != nil {
+		m.emit(event)
 	}
 }
 

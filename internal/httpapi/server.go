@@ -28,27 +28,54 @@ type Server struct {
 	eventConn *websocket.Conn
 }
 
+type pathRequest struct {
+	Path string `json:"path"`
+}
+
+type terminalRequest struct {
+	ProjectID string `json:"projectId"`
+	Cols      int    `json:"cols"`
+	Rows      int    `json:"rows"`
+}
+
+type inputRequest struct {
+	Data string `json:"data"`
+}
+
+type sizeRequest struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
+}
+
 func NewServer(version string, projectStore *projects.Store, terminals *terminal.Manager, staticDir string) *Server {
-	s := &Server{
+	if terminals == nil {
+		terminals = terminal.NewManager(nil)
+	}
+	return &Server{
 		version:   version,
 		started:   time.Now().UTC(),
 		projects:  projectStore,
 		terminals: terminals,
 		staticDir: staticDir,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				host := r.Host
-				origin := r.Header.Get("Origin")
-				return origin == "" ||
-					origin == "http://"+host ||
-					origin == "https://"+host ||
-					origin == "http://127.0.0.1:5173" ||
-					origin == "http://localhost:5173"
-			},
-		},
+		upgrader:  websocket.Upgrader{CheckOrigin: sameLocalOrigin},
 	}
-	terminals.SetEventHandler(s.publishTerminalEvent)
+}
+
+func NewTerminalServer(version string, projectStore *projects.Store, staticDir string) *Server {
+	s := &Server{version: version, started: time.Now().UTC(), projects: projectStore, staticDir: staticDir}
+	s.terminals = terminal.NewManager(s.publishTerminalEvent)
+	s.upgrader = websocket.Upgrader{CheckOrigin: sameLocalOrigin}
 	return s
+}
+
+func sameLocalOrigin(r *http.Request) bool {
+	host := r.Host
+	origin := r.Header.Get("Origin")
+	return origin == "" ||
+		origin == "http://"+host ||
+		origin == "https://"+host ||
+		origin == "http://127.0.0.1:5173" ||
+		origin == "http://localhost:5173"
 }
 
 func (s *Server) Handler() http.Handler {
@@ -61,6 +88,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/", s.handleStatic)
 	return mux
+}
+
+func (s *Server) Shutdown() {
+	s.terminals.Shutdown()
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -89,8 +120,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
 		projectList, err := s.projects.List()
 		if err != nil {
@@ -99,9 +128,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, projectList)
 	case http.MethodPost:
-		var req struct {
-			Path string `json:"path"`
-		}
+		var req pathRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, err, http.StatusBadRequest)
 			return
@@ -118,10 +145,6 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -140,16 +163,10 @@ func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTerminals(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
 		writeJSON(w, s.terminals.List(r.URL.Query().Get("projectId")))
 	case http.MethodPost:
-		var req struct {
-			ProjectID string `json:"projectId"`
-			Cols      int    `json:"cols"`
-			Rows      int    `json:"rows"`
-		}
+		var req terminalRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, err, http.StatusBadRequest)
 			return
@@ -182,19 +199,13 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action := parts[0], parts[1]
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	switch action {
 	case "input":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var req struct {
-			Data string `json:"data"`
-		}
+		var req inputRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, err, http.StatusBadRequest)
 			return
@@ -209,10 +220,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var req struct {
-			Cols int `json:"cols"`
-			Rows int `json:"rows"`
-		}
+		var req sizeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, err, http.StatusBadRequest)
 			return
@@ -223,7 +231,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case "close":
-		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -266,18 +274,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) publishTerminalEvent(event terminal.Event) {
 	s.eventMu.Lock()
 	conn := s.eventConn
-	s.eventMu.Unlock()
 	if conn == nil {
+		s.eventMu.Unlock()
 		return
 	}
 	if err := conn.WriteJSON(terminalEventPayload(event)); err != nil {
 		_ = conn.Close()
-		s.eventMu.Lock()
 		if s.eventConn == conn {
 			s.eventConn = nil
 		}
-		s.eventMu.Unlock()
 	}
+	s.eventMu.Unlock()
 }
 
 func terminalEventPayload(event terminal.Event) map[string]any {

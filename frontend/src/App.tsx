@@ -1,14 +1,9 @@
 import { FolderOpen, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, type Client, type Project, type TerminalSession } from "./bridge";
+import { useCallback, useEffect, useState } from "react";
+import { api, type Project, type TerminalSession } from "./bridge";
 import { TerminalPane } from "./terminal/TerminalPane";
 
-interface AppProps {
-  client?: Client;
-}
-
-export function App({ client: providedClient }: AppProps = {}) {
-  const client = useMemo(() => providedClient ?? createClient(), [providedClient]);
+export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -16,11 +11,11 @@ export function App({ client: providedClient }: AppProps = {}) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [nextProjects, nextTerminals] = await Promise.all([client.listProjects(), client.listTerminals()]);
+    const [nextProjects, nextTerminals] = await Promise.all([api.listProjects(), api.listTerminals()]);
     setProjects(nextProjects);
     setTerminals(nextTerminals);
     setActiveProjectId((current) => (current && nextProjects.some((project) => project.id === current) ? current : nextProjects[0]?.id ?? null));
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     load().catch((err) => setError(errorText(err)));
@@ -34,11 +29,11 @@ export function App({ client: providedClient }: AppProps = {}) {
   async function openProject() {
     try {
       setError(null);
-      const project = await client.openProjectDialog();
+      const project = await api.openProject();
       if (!project) return;
       setProjects((current) => upsertProject(current, project));
       setActiveProjectId(project.id);
-      const nextTerminals = await client.listTerminals(project.id);
+      const nextTerminals = await api.listTerminals(project.id);
       setTerminals((current) => [...current.filter((t) => t.projectId !== project.id), ...nextTerminals]);
       setActiveTerminalId(nextTerminals[0]?.id ?? null);
     } catch (err) {
@@ -49,7 +44,7 @@ export function App({ client: providedClient }: AppProps = {}) {
   async function forgetProject(projectId: string) {
     try {
       setError(null);
-      await client.forgetProject(projectId);
+      await api.forgetProject(projectId);
       setProjects((current) => {
         const next = current.filter((project) => project.id !== projectId);
         if (activeProjectId === projectId) {
@@ -68,7 +63,7 @@ export function App({ client: providedClient }: AppProps = {}) {
     if (!activeProject) return;
     try {
       setError(null);
-      const session = await client.startTerminal(activeProject.id, 100, 30);
+      const session = await api.startTerminal(activeProject.id, 100, 30);
       setTerminals((current) => {
         const idx = current.findIndex((t) => t.id === session.id);
         return idx === -1 ? [...current, session] : current.map((t, i) => (i === idx ? session : t));
@@ -82,7 +77,7 @@ export function App({ client: providedClient }: AppProps = {}) {
   async function closeTerminal(id: string) {
     try {
       setError(null);
-      await client.closeTerminal(id);
+      await api.closeTerminal(id);
       setTerminals((current) => {
         const closed = current.find((terminal) => terminal.id === id);
         const next = current.filter((terminal) => terminal.id !== id);
@@ -182,7 +177,6 @@ export function App({ client: providedClient }: AppProps = {}) {
                   key={terminal.id}
                   session={terminal}
                   visible={terminal.id === activeTerminal?.id}
-                  client={client}
                   onExit={markExited}
                   onError={setError}
                 />

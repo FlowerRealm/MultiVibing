@@ -11,7 +11,7 @@ import (
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(), "missing-dist").Handler())
+	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(nil), "missing-dist").Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/api/health")
@@ -37,7 +37,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestProjectsEndpointStartsEmpty(t *testing.T) {
-	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(), "missing-dist").Handler())
+	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(nil), "missing-dist").Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/api/projects")

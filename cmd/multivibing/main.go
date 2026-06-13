@@ -16,7 +16,6 @@ import (
 	"github.com/flowerrealm/multivibing/internal/httpapi"
 	"github.com/flowerrealm/multivibing/internal/projects"
 	"github.com/flowerrealm/multivibing/internal/system"
-	"github.com/flowerrealm/multivibing/internal/terminal"
 )
 
 const version = "0.1.0"
@@ -32,8 +31,7 @@ func main() {
 		log.Fatal(err)
 	}
 	projectStore := projects.NewStore(projectStorePath)
-	terminals := terminal.NewManager()
-	api := httpapi.NewServer(version, projectStore, terminals, cfg.StaticDir)
+	api := httpapi.NewTerminalServer(version, projectStore, cfg.StaticDir)
 	server := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           api.Handler(),
@@ -77,5 +75,5 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "shutdown failed: %v\n", err)
 	}
-	terminals.Shutdown()
+	api.Shutdown()
 }

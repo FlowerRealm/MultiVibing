@@ -28,12 +28,9 @@ func waitDone(t *testing.T, ch <-chan struct{}) {
 
 func TestTerminal_StartAndReceiveOutput(t *testing.T) {
 	skipIfWindows(t)
-	m := terminal.NewManager()
-	t.Cleanup(m.Shutdown)
-
 	var got []string
 	done := make(chan struct{})
-	m.SetEventHandler(func(e terminal.Event) {
+	m := terminal.NewManager(func(e terminal.Event) {
 		if e.Name == terminal.EventData {
 			got = append(got, e.Data)
 		}
@@ -41,6 +38,7 @@ func TestTerminal_StartAndReceiveOutput(t *testing.T) {
 			close(done)
 		}
 	})
+	t.Cleanup(m.Shutdown)
 
 	cwd, _ := os.Getwd()
 	sess, err := m.Start("proj-1", cwd, 80, 24)
@@ -61,17 +59,15 @@ func TestTerminal_StartAndReceiveOutput(t *testing.T) {
 
 func TestTerminal_ExitCode(t *testing.T) {
 	skipIfWindows(t)
-	m := terminal.NewManager()
-	t.Cleanup(m.Shutdown)
-
 	var exitCode *int
 	done := make(chan struct{})
-	m.SetEventHandler(func(e terminal.Event) {
+	m := terminal.NewManager(func(e terminal.Event) {
 		if e.Name == terminal.EventExit {
 			exitCode = e.ExitCode
 			close(done)
 		}
 	})
+	t.Cleanup(m.Shutdown)
 
 	cwd, _ := os.Getwd()
 	sess, err := m.Start("proj-1", cwd, 80, 24)
@@ -87,9 +83,8 @@ func TestTerminal_ExitCode(t *testing.T) {
 
 func TestTerminal_CloseRemovesSession(t *testing.T) {
 	skipIfWindows(t)
-	m := terminal.NewManager()
+	m := terminal.NewManager(nil)
 	t.Cleanup(m.Shutdown)
-	m.SetEventHandler(func(terminal.Event) {})
 
 	cwd, _ := os.Getwd()
 	sess, err := m.Start("proj-1", cwd, 80, 24)
