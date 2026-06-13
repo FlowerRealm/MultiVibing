@@ -2,10 +2,10 @@ package config
 
 import "testing"
 
-func TestParseBrowserArgsDefaultsToOpenBrowserMode(t *testing.T) {
-	cfg, err := ParseBrowserArgs(nil)
+func TestParseServerArgsDefaultsToWebMode(t *testing.T) {
+	cfg, err := ParseServerArgs(nil)
 	if err != nil {
-		t.Fatalf("ParseBrowserArgs returned error: %v", err)
+		t.Fatalf("ParseServerArgs returned error: %v", err)
 	}
 
 	if cfg.Host != DefaultHost {
@@ -22,14 +22,14 @@ func TestParseBrowserArgsDefaultsToOpenBrowserMode(t *testing.T) {
 	}
 }
 
-func TestParseBrowserArgsNoOpenAndDevFrontend(t *testing.T) {
-	cfg, err := ParseBrowserArgs([]string{
+func TestParseServerArgsNoOpenAndDevFrontend(t *testing.T) {
+	cfg, err := ParseServerArgs([]string{
 		"--no-open",
 		"--frontend-dev-url", "http://127.0.0.1:5173",
 		"--port", "4000",
 	})
 	if err != nil {
-		t.Fatalf("ParseBrowserArgs returned error: %v", err)
+		t.Fatalf("ParseServerArgs returned error: %v", err)
 	}
 
 	if cfg.OpenBrowser {

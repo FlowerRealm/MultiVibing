@@ -57,7 +57,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, s.app.Health("browser"))
+	writeJSON(w, s.app.Health("web"))
 }
 
 func (s *Server) handleCodexStatus(w http.ResponseWriter, r *http.Request) {

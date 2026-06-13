@@ -43,7 +43,7 @@ func TestHealthEndpoint(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		t.Fatalf("decode health: %v", err)
 	}
-	if !health.OK || health.Mode != "browser" || health.Version != "test-version" {
+	if !health.OK || health.Mode != "web" || health.Version != "test-version" {
 		t.Fatalf("unexpected health: %#v", health)
 	}
 }
