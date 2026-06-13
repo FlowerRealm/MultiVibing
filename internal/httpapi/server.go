@@ -21,11 +21,21 @@ type Server struct {
 	version   string
 	started   time.Time
 	projects  *projects.Store
-	terminals *terminal.Manager
+	terminals terminalService
 	staticDir string
 	upgrader  websocket.Upgrader
 	eventMu   sync.Mutex
 	eventConn *websocket.Conn
+}
+
+type terminalService interface {
+	List(projectID string) []terminal.Session
+	Start(projectID, cwd string, cols, rows int) (terminal.Session, error)
+	Write(id, data string) error
+	Resize(id string, cols, rows int) error
+	Close(id string) error
+	Snapshot(id string) (terminal.Snapshot, error)
+	Shutdown()
 }
 
 type pathRequest struct {
@@ -47,7 +57,7 @@ type sizeRequest struct {
 	Rows int `json:"rows"`
 }
 
-func NewServer(version string, projectStore *projects.Store, terminals *terminal.Manager, staticDir string) *Server {
+func NewServer(version string, projectStore *projects.Store, terminals terminalService, staticDir string) *Server {
 	if terminals == nil {
 		terminals = terminal.NewManager(nil)
 	}
@@ -200,6 +210,17 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	id, action := parts[0], parts[1]
 	switch action {
+	case "snapshot":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		snapshot, err := s.terminals.Snapshot(id)
+		if err != nil {
+			writeError(w, err, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, snapshot)
 	case "input":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -291,6 +312,7 @@ func terminalEventPayload(event terminal.Event) map[string]any {
 	payload := map[string]any{"terminalId": event.TerminalID}
 	if event.Data != "" {
 		payload["data"] = event.Data
+		payload["seq"] = event.Seq
 	}
 	if event.ExitCode != nil {
 		payload["exitCode"] = *event.ExitCode

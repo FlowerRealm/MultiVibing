@@ -81,6 +81,44 @@ func TestTerminal_ExitCode(t *testing.T) {
 	}
 }
 
+func TestTerminal_SnapshotKeepsHistoryAfterExit(t *testing.T) {
+	skipIfWindows(t)
+	done := make(chan struct{})
+	m := terminal.NewManager(func(e terminal.Event) {
+		if e.Name == terminal.EventExit {
+			close(done)
+		}
+	})
+	t.Cleanup(m.Shutdown)
+
+	cwd, _ := os.Getwd()
+	sess, err := m.Start("proj-1", cwd, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(sess.ID, "echo snapshot_marker\nexit 7\n"); err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, done)
+
+	snapshot, err := m.Snapshot(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot.History, "snapshot_marker") {
+		t.Fatalf("snapshot history missing marker: %q", snapshot.History)
+	}
+	if snapshot.Session.Status != terminal.StatusExited {
+		t.Fatalf("snapshot status = %s, want %s", snapshot.Session.Status, terminal.StatusExited)
+	}
+	if snapshot.Session.ExitCode == nil || *snapshot.Session.ExitCode != 7 {
+		t.Fatalf("snapshot exit code = %v, want 7", snapshot.Session.ExitCode)
+	}
+	if snapshot.LastSeq == 0 {
+		t.Fatal("snapshot LastSeq = 0, want non-zero")
+	}
+}
+
 func TestTerminal_CloseRemovesSession(t *testing.T) {
 	skipIfWindows(t)
 	m := terminal.NewManager(nil)

@@ -21,6 +21,8 @@ const (
 	EventData            = "terminal:data"
 	EventExit            = "terminal:exit"
 	EventError           = "terminal:error"
+
+	defaultHistoryLimit = 1 << 20
 )
 
 type Session struct {
@@ -36,28 +38,41 @@ type Event struct {
 	Name       string
 	TerminalID string
 	Data       string
+	Seq        uint64
 	ExitCode   *int
 	Error      string
 }
 
+type Snapshot struct {
+	Session   Session `json:"session"`
+	History   string  `json:"history"`
+	LastSeq   uint64  `json:"lastSeq"`
+	Truncated bool    `json:"truncated"`
+}
+
 type entry struct {
-	session Session
-	cmd     *exec.Cmd
-	ptm     *os.File
-	cancel  context.CancelFunc
-	writeMu sync.Mutex
+	session    Session
+	cmd        *exec.Cmd
+	ptm        *os.File
+	cancel     context.CancelFunc
+	outputDone chan struct{}
+	history    []byte
+	seq        uint64
+	writeMu    sync.Mutex
+	truncated  bool
 }
 
 type Manager struct {
-	mu      sync.RWMutex
-	nextID  int
-	entries map[string]*entry
-	order   []string
-	emit    func(Event)
+	mu           sync.RWMutex
+	nextID       int
+	entries      map[string]*entry
+	order        []string
+	emit         func(Event)
+	historyLimit int
 }
 
 func NewManager(emit func(Event)) *Manager {
-	return &Manager{entries: make(map[string]*entry), emit: emit}
+	return &Manager{entries: make(map[string]*entry), emit: emit, historyLimit: defaultHistoryLimit}
 }
 
 func (m *Manager) List(projectID string) []Session {
@@ -79,6 +94,21 @@ func (m *Manager) Get(id string) (Session, error) {
 		return e.session, nil
 	}
 	return Session{}, fmt.Errorf("terminal %q not found", id)
+}
+
+func (m *Manager) Snapshot(id string) (Snapshot, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	e, ok := m.entries[id]
+	if !ok {
+		return Snapshot{}, fmt.Errorf("terminal %q not found", id)
+	}
+	return Snapshot{
+		Session:   e.session,
+		History:   string(e.history),
+		LastSeq:   e.seq,
+		Truncated: e.truncated,
+	}, nil
 }
 
 func (m *Manager) Start(projectID, cwd string, cols, rows int) (Session, error) {
@@ -104,10 +134,11 @@ func (m *Manager) Start(projectID, cwd string, cols, rows int) (Session, error) 
 	m.nextID++
 	id := fmt.Sprintf("term-%d", m.nextID)
 	e := &entry{
-		session: Session{ID: id, ProjectID: projectID, Cwd: cwd, PID: cmd.Process.Pid, Status: StatusRunning},
-		cmd:     cmd,
-		ptm:     ptm,
-		cancel:  cancel,
+		session:    Session{ID: id, ProjectID: projectID, Cwd: cwd, PID: cmd.Process.Pid, Status: StatusRunning},
+		cmd:        cmd,
+		ptm:        ptm,
+		cancel:     cancel,
+		outputDone: make(chan struct{}),
 	}
 	m.entries[id] = e
 	m.order = append(m.order, id)
@@ -170,11 +201,14 @@ func (m *Manager) Shutdown() {
 }
 
 func (m *Manager) readOutput(id string, e *entry) {
+	defer close(e.outputDone)
 	buf := make([]byte, 8192)
 	for {
 		n, err := e.ptm.Read(buf)
-		if n > 0 && m.owns(id, e) {
-			m.publish(Event{Name: EventData, TerminalID: id, Data: string(buf[:n])})
+		if n > 0 {
+			if event, ok := m.recordOutput(id, e, buf[:n]); ok {
+				m.publish(event)
+			}
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrClosed) && m.owns(id, e) {
@@ -185,9 +219,36 @@ func (m *Manager) readOutput(id string, e *entry) {
 	}
 }
 
+func (m *Manager) recordOutput(id string, e *entry, data []byte) (Event, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries[id] != e {
+		return Event{}, false
+	}
+	e.seq++
+	m.appendHistory(e, data)
+	return Event{Name: EventData, TerminalID: id, Data: string(data), Seq: e.seq}, true
+}
+
+func (m *Manager) appendHistory(e *entry, data []byte) {
+	limit := m.historyLimit
+	if limit <= 0 {
+		e.history = nil
+		e.truncated = true
+		return
+	}
+	e.history = append(e.history, data...)
+	if len(e.history) <= limit {
+		return
+	}
+	e.truncated = true
+	e.history = append([]byte(nil), e.history[len(e.history)-limit:]...)
+}
+
 func (m *Manager) waitExit(id string, e *entry) {
 	_ = e.cmd.Wait()
 	e.cancel()
+	<-e.outputDone
 	m.mu.Lock()
 	cur, ok := m.entries[id]
 	if !ok || cur != e {

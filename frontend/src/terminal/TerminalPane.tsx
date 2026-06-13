@@ -56,19 +56,68 @@ export function TerminalPane({ session, visible, onExit, onError }: TerminalPane
     window.requestAnimationFrame(fitTerminal);
 
     let unsubscribe: (() => void) | undefined;
+    let disposed = false;
+    let snapshotLoaded = false;
+    let lastSeq = 0;
+    let pendingData: Array<{ data: string; seq: number }> = [];
+    let pendingExit: number | null | undefined;
+    const loadSnapshot = () => {
+      api
+        .getTerminalSnapshot(session.id)
+        .then((snapshot) => {
+          if (disposed) return;
+          if (snapshot.history) terminal.write(snapshot.history);
+          lastSeq = snapshot.lastSeq;
+          snapshotLoaded = true;
+          for (const event of pendingData) {
+            writeData(event.data, event.seq);
+          }
+          pendingData = [];
+          if (pendingExit !== undefined) {
+            writeExit(terminal, pendingExit);
+          } else if (snapshot.session.status === "exited") {
+            writeExit(terminal, snapshot.session.exitCode ?? null);
+            onExit(session.id, snapshot.session.exitCode ?? null);
+          }
+        })
+        .catch((err) => {
+          if (disposed) return;
+          snapshotLoaded = true;
+          pendingData = [];
+          onError(err instanceof Error ? err.message : String(err));
+        });
+    };
+    const writeData = (data: string, seq: number) => {
+      if (!snapshotLoaded) {
+        pendingData.push({ data, seq });
+        return;
+      }
+      if (seq > lastSeq) {
+        terminal.write(data);
+        lastSeq = seq;
+      }
+    };
+
     if (session.status === "running") {
       unsubscribe = api.subscribeTerminal(session.id, {
-        onData: (data) => terminal.write(data),
+        onData: writeData,
         onExit: (exitCode) => {
-          terminal.writeln("");
-          terminal.writeln(`[进程已退出${exitCode === null ? "" : `: ${exitCode}`}]`);
+          if (!snapshotLoaded) {
+            pendingExit = exitCode;
+          } else {
+            writeExit(terminal, exitCode);
+          }
           onExit(session.id, exitCode);
         },
         onError,
+        onReady: loadSnapshot,
       });
+    } else {
+      loadSnapshot();
     }
 
     return () => {
+      disposed = true;
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       dataDisposable.dispose();
       observer.disconnect();
@@ -91,4 +140,9 @@ export function TerminalPane({ session, visible, onExit, onError }: TerminalPane
   }, [visible, session.id]);
 
   return <div className={visible ? "terminal-pane active" : "terminal-pane"} ref={containerRef} />;
+}
+
+function writeExit(terminal: XTerm, exitCode: number | null) {
+  terminal.writeln("");
+  terminal.writeln(`[进程已退出${exitCode === null ? "" : `: ${exitCode}`}]`);
 }
