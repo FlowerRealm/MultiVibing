@@ -1,7 +1,7 @@
 # MultiVibing
 
-MultiVibing is a small Wails desktop app for opening local projects and running
-project-scoped terminals.
+MultiVibing is a local web app for opening projects and running project-scoped
+terminals. The app is served by a Go HTTP server with a Vite/React frontend.
 
 ## Development
 
@@ -10,17 +10,11 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts Wails in development mode. A standalone browser server is
-not part of the app.
-
-```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-npm run build:desktop
-```
+`npm run dev` starts the Vite frontend and the Go web server, then opens the
+local browser.
 
 ## Verification
 
 ```bash
-go test ./...
-npm run build
+npm test
 ```

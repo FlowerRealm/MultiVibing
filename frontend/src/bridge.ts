@@ -32,49 +32,114 @@ export interface Client {
   subscribeTerminal(id: string, handlers: TerminalHandlers): () => void;
 }
 
-declare global {
-  interface Window {
-    go?: { desktop?: { Bridge?: Record<string, (...args: unknown[]) => Promise<unknown>> } };
-    runtime?: { EventsOn(name: string, cb: (payload: Record<string, unknown>) => void): (() => void) | void };
-  }
-}
-
 export function createClient(): Client {
-  const b = window.go?.desktop?.Bridge;
-  if (!b) {
-    const fail = async (): Promise<never> => { throw new Error("Wails bridge unavailable — run wails dev"); };
-    return { listProjects: fail, openProjectDialog: fail, forgetProject: fail, listTerminals: fail,
-             startTerminal: fail, writeTerminal: fail, resizeTerminal: fail, closeTerminal: fail,
-             subscribeTerminal: () => () => {} };
-  }
-  return new WailsClient(b, window.runtime);
+  return new BrowserClient(import.meta.env.VITE_API_BASE ?? "");
 }
 
-type Bridge = NonNullable<NonNullable<Window["go"]>["desktop"]>["Bridge"];
-type Runtime = NonNullable<Window["runtime"]>;
+type JSONRequestInit = Omit<RequestInit, "body"> & { body?: unknown };
 
-class WailsClient implements Client {
-  constructor(private b: Bridge, private rt?: Runtime) {}
+class BrowserClient implements Client {
+  private socket: WebSocket | null = null;
+  private handlers = new Map<string, TerminalHandlers>();
 
-  async listProjects() { return ((await this.b!.ListProjects()) as Project[] | null) ?? []; }
-  openProjectDialog() { return this.b!.OpenProjectDialog() as Promise<Project | null>; }
-  forgetProject(id: string) { return this.b!.ForgetProject(id) as Promise<void>; }
-  async listTerminals(projectId = "") { return ((await this.b!.ListTerminals(projectId)) as TerminalSession[] | null) ?? []; }
-  startTerminal(projectId: string, cols: number, rows: number) { return this.b!.StartTerminal(projectId, cols, rows) as Promise<TerminalSession>; }
-  writeTerminal(id: string, data: string) { return this.b!.WriteTerminal(id, data) as Promise<void>; }
-  resizeTerminal(id: string, cols: number, rows: number) { return this.b!.ResizeTerminal(id, cols, rows) as Promise<void>; }
-  closeTerminal(id: string) { return this.b!.CloseTerminal(id) as Promise<void>; }
+  constructor(private readonly apiBase: string) {}
+
+  async listProjects(): Promise<Project[]> {
+    return this.json<Project[]>("/api/projects");
+  }
+
+  async openProjectDialog(): Promise<Project | null> {
+    const path = window.prompt("Project path");
+    if (!path) return null;
+    return this.json<Project>("/api/projects", { method: "POST", body: { path } });
+  }
+
+  forgetProject(id: string): Promise<void> {
+    return this.empty(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listTerminals(projectId = ""): Promise<TerminalSession[]> {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return this.json<TerminalSession[]>(`/api/terminals${query}`);
+  }
+
+  startTerminal(projectId: string, cols: number, rows: number): Promise<TerminalSession> {
+    return this.json<TerminalSession>("/api/terminals", { method: "POST", body: { projectId, cols, rows } });
+  }
+
+  writeTerminal(id: string, data: string): Promise<void> {
+    return this.empty(`/api/terminals/${encodeURIComponent(id)}/input`, { method: "POST", body: { data } });
+  }
+
+  resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
+    return this.empty(`/api/terminals/${encodeURIComponent(id)}/resize`, { method: "POST", body: { cols, rows } });
+  }
+
+  closeTerminal(id: string): Promise<void> {
+    return this.empty(`/api/terminals/${encodeURIComponent(id)}/close`, { method: "POST" });
+  }
 
   subscribeTerminal(id: string, handlers: TerminalHandlers): () => void {
-    const on = (name: string, cb: (p: Record<string, unknown>) => void) => {
-      const off = this.rt?.EventsOn(name, (p) => { if (p?.terminalId === id) cb(p); });
-      return typeof off === "function" ? off : () => {};
+    this.handlers.set(id, handlers);
+    this.ensureSocket();
+    return () => {
+      this.handlers.delete(id);
+      if (this.handlers.size === 0) {
+        this.socket?.close();
+        this.socket = null;
+      }
     };
-    const offs = [
-      on("terminal:data", (p) => handlers.onData(String(p.data ?? ""))),
-      on("terminal:exit", (p) => handlers.onExit(typeof p.exitCode === "number" ? p.exitCode : null)),
-      on("terminal:error", (p) => handlers.onError(String(p.error ?? "terminal error"))),
-    ];
-    return () => offs.forEach((f) => f());
+  }
+
+  private ensureSocket() {
+    if (this.socket && this.socket.readyState < WebSocket.CLOSING) return;
+    const socket = new WebSocket(this.wsURL("/api/events"));
+    socket.addEventListener("message", (message) => {
+      const event = JSON.parse(message.data) as Record<string, unknown>;
+      const id = String(event.terminalId ?? "");
+      const handlers = this.handlers.get(id);
+      if (!handlers) return;
+      switch (event.type) {
+        case "terminal:data":
+          handlers.onData(String(event.data ?? ""));
+          break;
+        case "terminal:exit":
+          handlers.onExit(typeof event.exitCode === "number" ? event.exitCode : null);
+          break;
+        case "terminal:error":
+          handlers.onError(String(event.error ?? "terminal error"));
+          break;
+      }
+    });
+    this.socket = socket;
+  }
+
+  private async json<T>(path: string, init?: JSONRequestInit): Promise<T> {
+    const response = await this.request(path, init);
+    return response.json() as Promise<T>;
+  }
+
+  private async empty(path: string, init?: JSONRequestInit): Promise<void> {
+    await this.request(path, init);
+  }
+
+  private async request(path: string, init: JSONRequestInit = {}): Promise<Response> {
+    const response = await fetch(`${this.apiBase}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init.headers },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `${path} failed with ${response.status}`);
+    }
+    return response;
+  }
+
+  private wsURL(path: string): string {
+    const base = this.apiBase || window.location.origin;
+    const url = new URL(path, base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
   }
 }
