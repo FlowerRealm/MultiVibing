@@ -17,7 +17,6 @@ import (
 	"github.com/flowerrealm/multivibing/internal/config"
 	"github.com/flowerrealm/multivibing/internal/events"
 	"github.com/flowerrealm/multivibing/internal/httpapi"
-	"github.com/flowerrealm/multivibing/internal/system"
 )
 
 const version = "0.1.0"
@@ -43,16 +42,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	url := cfg.PublicURL()
 	log.Printf("MultiVibing web server listening at http://%s", listener.Addr().String())
-	if cfg.OpenBrowser {
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			if err := system.OpenBrowser(url); err != nil {
-				log.Printf("open browser failed: %v", err)
-			}
-		}()
-	}
 
 	errCh := make(chan error, 1)
 	go func() {
