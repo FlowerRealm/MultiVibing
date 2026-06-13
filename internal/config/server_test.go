@@ -14,31 +14,24 @@ func TestParseServerArgsDefaultsToWebMode(t *testing.T) {
 	if cfg.Port != DefaultPort {
 		t.Fatalf("port = %d, want %d", cfg.Port, DefaultPort)
 	}
-	if !cfg.OpenBrowser {
-		t.Fatal("OpenBrowser = false, want true")
-	}
-	if cfg.PublicURL() != "http://127.0.0.1:34117" {
-		t.Fatalf("PublicURL = %q", cfg.PublicURL())
+	if cfg.StaticDir != "frontend/dist" {
+		t.Fatalf("StaticDir = %q", cfg.StaticDir)
 	}
 }
 
-func TestParseServerArgsNoOpenAndDevFrontend(t *testing.T) {
+func TestParseServerArgsCustomPortAndStaticDir(t *testing.T) {
 	cfg, err := ParseServerArgs([]string{
-		"--no-open",
-		"--frontend-dev-url", "http://127.0.0.1:5173",
 		"--port", "4000",
+		"--static-dir", "custom-dist",
 	})
 	if err != nil {
 		t.Fatalf("ParseServerArgs returned error: %v", err)
 	}
 
-	if cfg.OpenBrowser {
-		t.Fatal("OpenBrowser = true, want false")
-	}
-	if cfg.PublicURL() != "http://127.0.0.1:5173" {
-		t.Fatalf("PublicURL = %q", cfg.PublicURL())
-	}
 	if cfg.Addr() != "127.0.0.1:4000" {
 		t.Fatalf("Addr = %q", cfg.Addr())
+	}
+	if cfg.StaticDir != "custom-dist" {
+		t.Fatalf("StaticDir = %q", cfg.StaticDir)
 	}
 }
