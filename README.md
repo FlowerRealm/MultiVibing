@@ -10,8 +10,8 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts the Vite frontend and the Go web server, then opens the
-local browser.
+`npm run dev` starts the Vite frontend and the Go web server. Open the local URL
+shown in the terminal to view the app.
 
 ## Verification
 
