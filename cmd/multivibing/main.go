@@ -12,11 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flowerrealm/multivibing/internal/app"
-	"github.com/flowerrealm/multivibing/internal/codex"
 	"github.com/flowerrealm/multivibing/internal/config"
-	"github.com/flowerrealm/multivibing/internal/events"
 	"github.com/flowerrealm/multivibing/internal/httpapi"
+	"github.com/flowerrealm/multivibing/internal/projects"
 )
 
 const version = "0.1.0"
@@ -27,10 +25,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bus := events.NewBus()
-	gateway := codex.NewAppServerGateway(codex.DefaultLaunchConfig(), bus)
-	service := app.NewService(version, gateway, bus)
-	api := httpapi.NewServer(service, cfg.StaticDir)
+	projectStorePath, err := projects.DefaultStorePath()
+	if err != nil {
+		log.Fatal(err)
+	}
+	projectStore := projects.NewStore(projectStorePath)
+	api := httpapi.NewTerminalServer(version, projectStore, cfg.StaticDir)
 	server := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           api.Handler(),
@@ -65,5 +65,5 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "shutdown failed: %v\n", err)
 	}
-	_ = gateway.Stop()
+	api.Shutdown()
 }

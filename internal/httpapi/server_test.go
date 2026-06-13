@@ -1,33 +1,18 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/flowerrealm/multivibing/internal/app"
-	"github.com/flowerrealm/multivibing/internal/codex"
-	"github.com/flowerrealm/multivibing/internal/events"
+	"github.com/flowerrealm/multivibing/internal/projects"
+	"github.com/flowerrealm/multivibing/internal/terminal"
 )
 
-type fakeGateway struct{}
-
-func (fakeGateway) Start(context.Context) error { return nil }
-func (fakeGateway) Stop() error                 { return nil }
-func (fakeGateway) Subscribe(int) (<-chan events.Event, func()) {
-	ch := make(chan events.Event)
-	close(ch)
-	return ch, func() {}
-}
-func (fakeGateway) Status(context.Context) codex.Status {
-	return codex.Status{Available: true, Version: "codex-cli test"}
-}
-
 func TestHealthEndpoint(t *testing.T) {
-	service := app.NewService("test-version", fakeGateway{}, events.NewBus())
-	server := httptest.NewServer(NewServer(service, "missing-dist").Handler())
+	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(nil), "missing-dist").Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/api/health")
@@ -39,7 +24,11 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	var health app.Health
+	var health struct {
+		OK      bool   `json:"ok"`
+		Mode    string `json:"mode"`
+		Version string `json:"version"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		t.Fatalf("decode health: %v", err)
 	}
@@ -48,22 +37,117 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestCodexStatusEndpoint(t *testing.T) {
-	service := app.NewService("test-version", fakeGateway{}, events.NewBus())
-	server := httptest.NewServer(NewServer(service, "missing-dist").Handler())
+func TestProjectsEndpointStartsEmpty(t *testing.T) {
+	server := httptest.NewServer(NewServer("test-version", testStore(t), terminal.NewManager(nil), "missing-dist").Handler())
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/api/codex/status")
+	resp, err := http.Get(server.URL + "/api/projects")
 	if err != nil {
-		t.Fatalf("GET /api/codex/status failed: %v", err)
+		t.Fatalf("GET /api/projects failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	var status codex.Status
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		t.Fatalf("decode status: %v", err)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if !status.Available || status.Version != "codex-cli test" {
-		t.Fatalf("unexpected status: %#v", status)
+	var projectList []projects.Project
+	if err := json.NewDecoder(resp.Body).Decode(&projectList); err != nil {
+		t.Fatalf("decode projects: %v", err)
+	}
+	if len(projectList) != 0 {
+		t.Fatalf("projects = %#v, want empty", projectList)
 	}
 }
+
+func TestTerminalSnapshotEndpoint(t *testing.T) {
+	terminals := &fakeTerminalService{
+		snapshots: map[string]terminal.Snapshot{
+			"term-1": {
+				Session: terminal.Session{
+					ID:        "term-1",
+					ProjectID: "proj-1",
+					Cwd:       "/tmp/project",
+					PID:       123,
+					Status:    terminal.StatusRunning,
+				},
+				History:   "hello\n",
+				LastSeq:   3,
+				Truncated: true,
+			},
+		},
+	}
+	server := httptest.NewServer(NewServer("test-version", testStore(t), terminals, "missing-dist").Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/terminals/term-1/snapshot")
+	if err != nil {
+		t.Fatalf("GET snapshot failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var snapshot terminal.Snapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if snapshot.Session.ID != "term-1" || snapshot.History != "hello\n" || snapshot.LastSeq != 3 || !snapshot.Truncated {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+}
+
+func TestTerminalSnapshotEndpointNotFound(t *testing.T) {
+	server := httptest.NewServer(NewServer("test-version", testStore(t), &fakeTerminalService{}, "missing-dist").Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/terminals/missing/snapshot")
+	if err != nil {
+		t.Fatalf("GET missing snapshot failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func testStore(t *testing.T) *projects.Store {
+	t.Helper()
+	return projects.NewStore(t.TempDir() + "/projects.json")
+}
+
+type fakeTerminalService struct {
+	snapshots map[string]terminal.Snapshot
+}
+
+func (f *fakeTerminalService) List(projectID string) []terminal.Session {
+	return nil
+}
+
+func (f *fakeTerminalService) Start(projectID, cwd string, cols, rows int) (terminal.Session, error) {
+	return terminal.Session{}, fmt.Errorf("not implemented")
+}
+
+func (f *fakeTerminalService) Write(id, data string) error {
+	return nil
+}
+
+func (f *fakeTerminalService) Resize(id string, cols, rows int) error {
+	return nil
+}
+
+func (f *fakeTerminalService) Close(id string) error {
+	return nil
+}
+
+func (f *fakeTerminalService) Snapshot(id string) (terminal.Snapshot, error) {
+	if f.snapshots != nil {
+		if snapshot, ok := f.snapshots[id]; ok {
+			return snapshot, nil
+		}
+	}
+	return terminal.Snapshot{}, fmt.Errorf("terminal %q not found", id)
+}
+
+func (f *fakeTerminalService) Shutdown() {}

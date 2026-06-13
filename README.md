@@ -1,7 +1,7 @@
 # MultiVibing
 
-MultiVibing is a web interface for Codex CLI. The app is served by a Go HTTP
-server with a Vite/React frontend and a Codex app-server gateway.
+MultiVibing is a local web app for opening projects and running project-scoped
+terminals. The app is served by a Go HTTP server with a Vite/React frontend.
 
 ## Development
 
